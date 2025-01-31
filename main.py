@@ -1,126 +1,116 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
-from sklearn.multioutput import MultiOutputRegressor
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    confusion_matrix, 
+    classification_report, 
+    roc_auc_score, 
+    precision_recall_curve, 
+    average_precision_score
+)
+from sklearn.feature_selection import mutual_info_classif
+import warnings
 
-class FoodborneIllnessPredictionModel:
+class OutbreakPredictionModel:
     def __init__(self, data_path):
+        warnings.filterwarnings('ignore')
         self.data = pd.read_csv(data_path)
-        self.prepare_data()
+        self.preprocess_data()
     
-    def prepare_data(self):
-        # Data cleaning and preprocessing
-        self.data['Date'] = pd.to_datetime(self.data['Year'].astype(str) + '-' + self.data['Month'].astype(str))
-        self.data['Season'] = self.data['Date'].dt.month.map({
-            12: 'Winter', 1: 'Winter', 2: 'Winter',
-            3: 'Spring', 4: 'Spring', 5: 'Spring',
-            6: 'Summer', 7: 'Summer', 8: 'Summer',
-            9: 'Fall', 10: 'Fall', 11: 'Fall'
-        })
+    def preprocess_data(self):
+        # Explicit date parsing
+        self.data['Date'] = pd.to_datetime(
+        self.data['Year'].astype(str) + '-' + 
+        self.data['Month'].astype(str) + '-01'
+    )
+        
+        # Advanced season mapping
+        month_map = {
+        'January': 1, 'February': 2, 'March': 3, 
+        'April': 4, 'May': 5, 'June': 6,
+        'July': 7, 'August': 8, 'September': 9,
+        'October': 10, 'November': 11, 'December': 12
+        }
+        
+        if isinstance(self.data['Month'].iloc[0], str):
+            self.data['Month'] = self.data['Month'].map(month_map)
+
+        # More sophisticated outbreak risk categorization
+        self.data['Outbreak_Risk'] = np.where(
+            (self.data['Illnesses'] > self.data['Illnesses'].quantile(0.75)) & 
+            (self.data['Hospitalizations'] > 0),
+            'High', 'Low'
+        )
     
     def feature_engineering(self):
-        # Create risk features
-        state_risk = self.data.groupby('State')[['Illnesses', 'Hospitalizations', 'Fatalities']].mean()
-        location_risk = self.data.groupby('Location')[['Illnesses', 'Hospitalizations', 'Fatalities']].mean()
-        seasonal_risk = self.data.groupby('Season')[['Illnesses', 'Hospitalizations', 'Fatalities']].mean()
-        
-        return state_risk, location_risk, seasonal_risk
+        # Remove 'Season' if not in columns
+        predictive_features = [
+            col for col in ['State', 'Location', 'Food', 'Ingredient', 
+                        'Season', 'Species', 'Serotype/Genotype'] 
+            if col in self.data.columns
+        ]
     
-    def prepare_ml_dataset(self):
-        # Prepare features and target variables
-        features = ['State', 'Location', 'Food', 'Ingredient', 'Season']
-        categorical_features = ['State', 'Location', 'Food', 'Ingredient', 'Season']
-        
-        # Preprocessing
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
-            ])
-        
-        # Multi-output models
-        X = self.data[features]
-        y_severity = self.data[['Illnesses', 'Hospitalizations', 'Fatalities']]
-        
-        return X, y_severity, preprocessor
+        X = pd.get_dummies(self.data[predictive_features])
+        y = (self.data['Outbreak_Risk'] == 'High').astype(int)
     
-    def train_models(self):
-        X, y_severity, preprocessor = self.prepare_ml_dataset()
+    # Rest of the method remains the same
         
-        # Split the data
-        X_train, X_test, y_train, y_test = train_test_split(X, y_severity, test_size=0.2, random_state=42)
+        # Feature importance
+        feature_importance = mutual_info_classif(X, y)
+        feature_importance_dict = dict(zip(X.columns, feature_importance))
         
-        # Severity Prediction Model
-        severity_model = Pipeline([
-            ('preprocessor', preprocessor),
-            ('regressor', MultiOutputRegressor(GradientBoostingRegressor(random_state=42)))
-        ])
-        
-        # Geographic Risk Classification Model
-        risk_model = Pipeline([
-            ('preprocessor', preprocessor),
-            ('classifier', RandomForestClassifier(n_estimators=100, random_state=42))
-        ])
-        
-        # Train models
-        severity_model.fit(X_train, y_train)
-        risk_model.fit(X_train, y_train['Illnesses'] > y_train['Illnesses'].median())
-        
-        return severity_model, risk_model
+        return X, y, feature_importance_dict
     
-    def generate_risk_analysis(self):
-        state_risk, location_risk, seasonal_risk = self.feature_engineering()
+    def create_model_pipeline(self):
+        X, y, feature_importance = self.feature_engineering()
         
-        # Comprehensive risk analysis
-        risk_analysis = {
-            'state_risk': state_risk,
-            'location_risk': location_risk,
-            'seasonal_risk': seasonal_risk
-        }
+        # Split data with stratification
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
         
-        return risk_analysis
+        # Advanced Random Forest with feature weighting
+        clf = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=10,
+            min_samples_split=5,
+            class_weight='balanced',
+            random_state=42
+        )
+        
+        clf.fit(X_train, y_train)
+        
+        return clf, X_test, y_test
     
-    def predict_outbreak(self, input_data):
-        severity_model, risk_model = self.train_models()
+    def comprehensive_evaluation(self):
+        clf, X_test, y_test = self.create_model_pipeline()
         
-        # Predict severity
-        severity_prediction = severity_model.predict(input_data)
+        # Predictions
+        y_pred = clf.predict(X_test)
+        y_pred_proba = clf.predict_proba(X_test)[:, 1]
         
-        # Predict risk level
-        risk_prediction = risk_model.predict(input_data)
-        
+        # Comprehensive Metrics
         return {
-            'severity': severity_prediction,
-            'risk_level': risk_prediction
+            'Confusion_Matrix': confusion_matrix(y_test, y_pred),
+            'Classification_Report': classification_report(y_test, y_pred),
+            'ROC_AUC_Score': roc_auc_score(y_test, y_pred_proba),
+            'Average_Precision': average_precision_score(y_test, y_pred_proba)
         }
 
-# Example usage
 def main():
-    model = FoodborneIllnessPredictionModel('foodborne_illness_data.csv')
+    model = OutbreakPredictionModel('outbreaks.csv')
     
-    # Generate risk analysis
-    risk_analysis = model.generate_risk_analysis()
-    print("Risk Analysis:")
-    for key, value in risk_analysis.items():
-        print(f"{key}:\n{value}\n")
+    # Evaluate model
+    evaluation = model.comprehensive_evaluation()
     
-    # Example prediction input
-    sample_input = pd.DataFrame({
-        'State': ['California'],
-        'Location': ['Restaurant'],
-        'Food': ['Seafood'],
-        'Ingredient': ['Fish'],
-        'Season': ['Summer']
-    })
-    
-    # Make predictions
-    predictions = model.predict_outbreak(sample_input)
-    print("\nPrediction Results:")
-    print("Severity Prediction:", predictions['severity'])
-    print("Risk Level:", predictions['risk_level'])
+    print("Confusion Matrix:\n", evaluation['Confusion_Matrix'])
+    print("\nClassification Report:\n", evaluation['Classification_Report'])
+    print(f"\nROC AUC Score: {evaluation['ROC_AUC_Score']:.4f}")
+    print(f"Average Precision: {evaluation['Average_Precision']:.4f}")
 
 if __name__ == "__main__":
     main()
