@@ -2,3 +2,5 @@ scikit-learn
 pandas
 seaborn
 matplotlib
+imbalanced-learn
+joblib
