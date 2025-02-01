@@ -89,8 +89,7 @@ def main():
 
     col1, col2, col3 = st.columns(3)
     
-    st.title("Outbreak Prediction Dashboard")
-    
+    st.markdown("<h1 style='text-align: center; color: red;'>Outbreak Prediction Dashboard</h1>", unsafe_allow_html=True)    
     try:
         model, evaluation = load_model_and_data()
         
