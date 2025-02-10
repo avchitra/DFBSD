@@ -70,23 +70,6 @@ class ProjectVisualizer:
         
         self.set_style(ax1)
         
-        # Twitter Data Distribution
-        # Try to find a suitable numerical column for visualization
-        twitter_num_cols = twitter_data.select_dtypes(include=[np.number]).columns
-        if len(twitter_num_cols) > 0:
-            sns.histplot(data=twitter_data, x=twitter_num_cols[0], ax=ax2, color=self.colors[2])
-            ax2.set_title(f'Distribution of {twitter_num_cols[0]}\n(Twitter Data)')
-        else:
-            # If no numerical columns, try categorical
-            cat_cols = twitter_data.select_dtypes(include=['object', 'category']).columns
-            if len(cat_cols) > 0:
-                twitter_data[cat_cols[0]].value_counts().head(10).plot(
-                    kind='bar', ax=ax2, color=self.colors[2])
-                ax2.set_title(f'Top 10 {cat_cols[0]} Values\n(Twitter Data)')
-                plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha='right')
-            else:
-                ax2.text(0.5, 0.5, 'No suitable columns found for visualization', 
-                        ha='center', va='center')
         
         self.set_style(ax2)
         
@@ -183,15 +166,24 @@ if __name__ == "__main__":
         cdc_data = pd.read_csv('outbreaks.csv')
         twitter_data = pd.read_pickle('TWEET-FID/LREC_BSC/train.p')
         
+        feature_importance = pd.DataFrame({
+        "feature": [
+            "Hospitalizations", "Location_encoded", "Status_encoded", 
+            "State_encoded", "Food_encoded", "Fatalities", "Years_Ago", 
+            "Year", "Month_cos", "Month_sin"
+        ],
+        "importance": [0.414242, 0.239853, 0.209918, 0.071430, 0.022342, 
+                       0.017207, 0.010862, 0.008702, 0.003602, 0.001844]
+        })
+
+
+
         # Create sample model results dictionary
         model_results = {
             'true': np.array([0, 1, 0, 1, 1]),
             'pred': np.array([0, 1, 0, 0, 1]),
             'roc_curve': (np.array([0, 0.5, 1]), np.array([0, 0.7, 1])),
-            'feature_importance': pd.Series({'feature1': 0.3, 'feature2': 0.7}),
-            'time_performance': pd.DataFrame({
-                'f1_score': [0.8, 0.85, 0.82]
-            }, index=pd.date_range('2024-01-01', periods=3))
+            'feature_importance': feature_importance,
         }
         
         detection_results = pd.DataFrame({

@@ -233,7 +233,10 @@ class DualModelSystem:
         print("\nTwitter Model Evaluation (Test Set):")
         print(classification_report(self.twitter_classifier.y_test, y_test_pred))
         
-        
+        y_test_pred_proba = self.twitter_classifier.model.predict_proba(self.twitter_classifier.X_test)[:,1]
+        print(f"\nTwitter Model AUC-ROC Score (Test Set): {roc_auc_score(self.twitter_classifier.y_test, y_test_pred_proba):.3f}")
+        print("\nTwitter Model Confusion Matrix (Test Set):")
+        print(confusion_matrix(self.twitter_classifier.y_test, y_test_pred))
 
     def train_outbreak_model(self, cdc_data_path):
         """Train the outbreak prediction model"""
@@ -265,6 +268,17 @@ class DualModelSystem:
         y_test_pred = self.outbreak_predictor.model.predict(X_test)
         print("\nOutbreak Model Evaluation (Test Set):")
         print(classification_report(y_test, y_test_pred))
+
+        from sklearn.metrics import roc_auc_score, confusion_matrix
+
+        # Calculate and print AUC-ROC score
+        roc_auc = roc_auc_score(y_test, y_test_pred)
+        print("\nAUC-ROC Score (Test Set):", roc_auc)
+
+        # Calculate and print confusion matrix
+        conf_matrix = confusion_matrix(y_test, y_test_pred)
+        print("\nConfusion Matrix (Test Set):\n", conf_matrix)
+
         
         # Print feature importances
         importances = pd.DataFrame({
