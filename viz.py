@@ -3,11 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-import pickle
-from sklearn.metrics import confusion_matrix, classification_report
-import plotly.express as px
+from sklearn.metrics import confusion_matrix
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
 
 class ProjectVisualizer:
     def __init__(self, save_path="project_figures/"):
@@ -32,7 +29,7 @@ class ProjectVisualizer:
         ax.grid(True, linestyle='--', alpha=0.7)
         ax.set_axisbelow(True)
         
-    def plot_data_distribution(self, cdc_data, twitter_data):
+    def plot_data_distribution(self, cdc_data):
         """
         Plot distribution of data sources
         
@@ -40,15 +37,11 @@ class ProjectVisualizer:
         -----------
         cdc_data : pandas.DataFrame
             DataFrame containing CDC outbreak data
-        twitter_data : pandas.DataFrame
-            DataFrame containing Twitter data
         """
         # First, let's examine what columns we have
         print("CDC data columns:", cdc_data.columns.tolist())
-        print("Twitter data columns:", twitter_data.columns.tolist())
         
-        # Create subplots based on available data
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        fig, ax1 = plt.subplots(figsize=(15, 6))
         
         # CDC Outbreaks by State (if available)
         if 'State' in cdc_data.columns:
@@ -70,43 +63,43 @@ class ProjectVisualizer:
         
         self.set_style(ax1)
         
-        
-        self.set_style(ax2)
-        
         plt.tight_layout()
         plt.savefig(self.save_path / 'data_distribution.png', dpi=300, bbox_inches='tight')
         plt.close()
-        
-    def plot_model_performance(self, model_results):
-        """Plot model performance metrics"""
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        
+    def plot_model_performance(self, true_positives, false_negatives, false_positives, true_negatives, feature_importance):
+        """
+        Plot model performance using a confusion matrix, ROC curve, and feature importance.
+        """
+        # Create figure and axes - fix the unpacking
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+
         # Confusion Matrix
-        cm = confusion_matrix(model_results['true'], model_results['pred'])
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[0,0])
-        axes[0,0].set_title('Confusion Matrix')
+        cm = np.array([[true_negatives, false_positives], 
+                    [false_negatives, true_positives]])
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax1)
+        ax1.set_title('Confusion Matrix')
+        ax1.set_xlabel('Predicted Label')
+        ax1.set_ylabel('True Label')
+        ax1.set_xticklabels(['Negative', 'Positive'])
+        ax1.set_yticklabels(['Negative', 'Positive'])
         
         # ROC Curve
-        fpr, tpr = model_results['roc_curve']
-        axes[0,1].plot(fpr, tpr, color=self.colors[1])
-        axes[0,1].plot([0, 1], [0, 1], 'k--')
-        axes[0,1].set_title('ROC Curve')
-        axes[0,1].set_xlabel('False Positive Rate')
-        axes[0,1].set_ylabel('True Positive Rate')
+        fpr = false_positives / (false_positives + true_negatives) if (false_positives + true_negatives) > 0 else 0
+        tpr = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
         
+        ax2.plot([0, fpr, 1], [0, tpr, 1], color=self.colors[1], marker='o', linestyle='-')
+        ax2.plot([0, 1], [0, 1], 'k--')  # Random classifier reference line
+        ax2.set_title('ROC Curve')
+        ax2.set_xlabel('False Positive Rate')
+        ax2.set_ylabel('True Positive Rate')
+
         # Feature Importance
-        feat_imp = model_results['feature_importance'].sort_values(ascending=True)
-        feat_imp.plot(kind='barh', ax=axes[1,0], color=self.colors[3])
-        axes[1,0].set_title('Feature Importance')
-        
-        # Performance Over Time
-        time_perf = model_results['time_performance']
-        axes[1,1].plot(time_perf.index, time_perf['f1_score'], color=self.colors[2])
-        axes[1,1].set_title('Model Performance Over Time')
-        axes[1,1].set_xlabel('Date')
-        axes[1,1].set_ylabel('F1 Score')
-        
-        for ax in axes.flat:
+        sorted_feat_imp = feature_importance.sort_values(by='importance', ascending=True)
+        sorted_feat_imp.plot(kind='barh', x='feature', y='importance', ax=ax3, color=self.colors[3])
+        ax3.set_title('Feature Importance')
+
+        # Apply styling to each axis
+        for ax in [ax1, ax2, ax3]:
             self.set_style(ax)
             
         plt.tight_layout()
@@ -144,13 +137,19 @@ class ProjectVisualizer:
         
         fig.write_image(str(self.save_path / 'detection_timeline.png'))
         
-    def generate_all_figures(self, cdc_data, twitter_data, model_results, detection_results):
+    def generate_all_figures(self, cdc_data, model_results, detection_results):
         """Generate all figures for the project"""
         print("Generating data distribution plots...")
-        self.plot_data_distribution(cdc_data, twitter_data)
+        self.plot_data_distribution(cdc_data)
         
         print("Generating model performance plots...")
-        self.plot_model_performance(model_results)
+        self.plot_model_performance(
+            model_results['true_positives'],
+            model_results['false_negatives'],
+            model_results['false_positives'],
+            model_results['true_negatives'],
+            model_results['feature_importance']
+        )
         
         print("Generating detection timeline comparison...")
         self.create_timeline_comparison(detection_results)
@@ -159,12 +158,11 @@ class ProjectVisualizer:
 
 # Example usage
 if __name__ == "__main__":
-    try:
+#   try:
         visualizer = ProjectVisualizer()
         
         # Load your data here
         cdc_data = pd.read_csv('outbreaks.csv')
-        twitter_data = pd.read_pickle('TWEET-FID/LREC_BSC/train.p')
         
         feature_importance = pd.DataFrame({
         "feature": [
@@ -180,9 +178,10 @@ if __name__ == "__main__":
 
         # Create sample model results dictionary
         model_results = {
-            'true': np.array([0, 1, 0, 1, 1]),
-            'pred': np.array([0, 1, 0, 0, 1]),
-            'roc_curve': (np.array([0, 0.5, 1]), np.array([0, 0.7, 1])),
+            'true_negatives': 1580,
+            'false_positives': 413,
+            'false_negatives': 647,
+            'true_positives': 1184,
             'feature_importance': feature_importance,
         }
         
@@ -192,15 +191,12 @@ if __name__ == "__main__":
             'ml_detection_days': np.random.randint(2, 8, 10)
         })
         
-        visualizer.generate_all_figures(cdc_data, twitter_data, model_results, detection_results)
+        visualizer.generate_all_figures(cdc_data, model_results, detection_results)
         
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        # Print more detailed information about the data
-        print("\nData info:")
-        if 'cdc_data' in locals():
-            print("\nCDC data info:")
-            print(cdc_data.info())
-        if 'twitter_data' in locals():
-            print("\nTwitter data info:")
-            print(twitter_data.info())
+#    except Exception as e:
+#        print(f"An error occurred: {str(e)}")
+#        # Print more detailed information about the data
+#        print("\nData info:")
+#        if 'cdc_data' in locals():
+#            print("\nCDC data info:")
+#            print(cdc_data.info())
